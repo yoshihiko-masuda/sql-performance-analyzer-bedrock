@@ -47,15 +47,34 @@ def analyze_sql_performance(sql, execution_plan_table):
 
 
 if __name__ == "__main__":
-    sql = """SELECT * FROM orders o
+    # パターン1：JOIN + フルスキャン
+    sql1 = """SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE o.order_date > '2025-01-01';"""
 
-    execution_plan = """| Operation | Cost | Rows |
+    plan1 = """| Operation | Cost | Rows |
 |---|---|---|
 | TABLE ACCESS FULL orders | 8500 | 1200000 |
 | TABLE ACCESS FULL customers | 3200 | 500000 |
 | HASH JOIN | 12000 | 45000 |"""
 
-    result = analyze_sql_performance(sql, execution_plan)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    # パターン2：サブクエリ + ソート処理が重いケース
+    sql2 = """SELECT product_id, SUM(amount) as total
+FROM sales
+WHERE sale_date BETWEEN '2025-01-01' AND '2025-12-31'
+GROUP BY product_id
+ORDER BY total DESC;"""
+
+    plan2 = """| Operation | Cost | Rows |
+|---|---|---|
+| TABLE ACCESS FULL sales | 15000 | 3000000 |
+| SORT GROUP BY | 22000 | 8000 |
+| SORT ORDER BY | 23500 | 8000 |"""
+
+    print("=== パターン1 ===")
+    result1 = analyze_sql_performance(sql1, plan1)
+    print(json.dumps(result1, indent=2, ensure_ascii=False))
+
+    print("\n=== パターン2 ===")
+    result2 = analyze_sql_performance(sql2, plan2)
+    print(json.dumps(result2, indent=2, ensure_ascii=False))
