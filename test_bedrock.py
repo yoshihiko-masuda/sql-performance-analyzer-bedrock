@@ -1,5 +1,22 @@
 import boto3
 import json
+from datetime import datetime
+
+s3_client = boto3.client("s3", region_name="ap-northeast-1")
+BUCKET_NAME = "sql-performance-portfolio-2026"
+
+def save_result_to_s3(result, label):
+    """分析結果をS3にJSONファイルとして保存する"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    key = f"results/{label}_{timestamp}.json"
+
+    s3_client.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=json.dumps(result, ensure_ascii=False, indent=2),
+        ContentType="application/json"
+    )
+    print(f"S3に保存しました: s3://{BUCKET_NAME}/{key}")
 
 client = boto3.client("bedrock-runtime", region_name="ap-northeast-1")
 model_id = "global.anthropic.claude-sonnet-5"
@@ -74,7 +91,10 @@ ORDER BY total DESC;"""
     print("=== パターン1 ===")
     result1 = analyze_sql_performance(sql1, plan1)
     print(json.dumps(result1, indent=2, ensure_ascii=False))
+    save_result_to_s3(result1, "pattern1")
+
 
     print("\n=== パターン2 ===")
     result2 = analyze_sql_performance(sql2, plan2)
     print(json.dumps(result2, indent=2, ensure_ascii=False))
+    save_result_to_s3(result2, "pattern2")
