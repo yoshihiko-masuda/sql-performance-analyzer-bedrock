@@ -41,5 +41,8 @@ streamlit run dashboard.py
 ブラウザで `http://localhost:8501` にアクセスし、SQL文を入力すると、実行計画の取得からBedrockによる分析・S3保存までを一気通貫で確認できます。
 
 ## スクリーンショット
+### SQL入力画面
+![SQL入力画面](screenshot_input.png)
 
-（ここにダッシュボードの実行画面のスクリーンショットを挿入）
+### 分析結果画面
+![分析結果画面](screenshot_result.png)
