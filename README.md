@@ -24,11 +24,11 @@ SQL文と実行計画を入力すると、Claude（AWS Bedrock）がボトルネ
 ## 実行方法
 
 ### 1. 環境構築
-​``bash
+```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-​```
+```
 
 ### 2. 環境変数の設定
 `.envファイルを作成し、Aurora接続情報とAWS認証情報を設定してください。
