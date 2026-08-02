@@ -31,7 +31,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. 環境変数の設定
-`.envファイルを作成し、Aurora接続情報とAWS認証情報を設定してください。
+`.env`ファイルを作成し、Aurora接続情報とAWS認証情報を設定してください。
 
 ### 3. ダッシュボードの起動
 ```bash
