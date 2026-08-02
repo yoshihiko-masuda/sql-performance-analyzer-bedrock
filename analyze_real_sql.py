@@ -1,9 +1,14 @@
+"""
+Aurora MySQLに接続してSQL実行計画（EXPLAIN）を取得し、
+Bedrock(Claude)による性能分析を実行、結果をS3に保存するスクリプト
+"""
 import pymysql
 import json
 import os
 from dotenv import load_dotenv
 from test_bedrock import analyze_sql_performance, save_result_to_s3
 
+# .envファイルからDB接続情報などの環境変数を読み込む（機密情報はGit管理しない）
 load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST")
@@ -20,11 +25,12 @@ def get_execution_plan(sql):
     )
     try:
         with conn.cursor() as cursor:
+            # EXPLAIN文を実行し、実行計画（type, key, rowsなど）を取得
             cursor.execute(f"EXPLAIN {sql}")
             columns = [desc[0] for desc in cursor.description]
             rows = cursor.fetchall()
 
-            # Markdown表形式に変換
+            # Bedrockに渡しやすいよう、取得結果をMarkdown表形式に変換
             header = "| " + " | ".join(columns) + " |"
             separator = "|" + "|".join(["---"] * len(columns)) + "|"
             body_lines = [
@@ -33,10 +39,12 @@ def get_execution_plan(sql):
             ]
             return "\n".join([header, separator] + body_lines)
     finally:
+        # 接続は必ずクローズする（例外発生時も含めて）
         conn.close()
 
 
 if __name__ == "__main__":
+    # 動作確認用のサンプルSQL（order_dateに未インデックスの想定パターン）
     sql = """SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE o.order_date > '2025-01-01'"""
@@ -45,8 +53,10 @@ WHERE o.order_date > '2025-01-01'"""
     plan_text = get_execution_plan(sql)
     print(plan_text)
 
+    # 取得した実行計画をBedrockに渡し、ボトルネックと改善案を分析させる
     print("\nBedrockで分析中...")
     result = analyze_sql_performance(sql, plan_text)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
+    # 分析結果をS3に保存（ファイル名にパターン名を付与し、後で見返せるように）
     save_result_to_s3(result, "real_aurora_pattern1")
