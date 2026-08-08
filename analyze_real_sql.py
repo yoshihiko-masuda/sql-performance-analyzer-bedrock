@@ -18,15 +18,28 @@ DB_NAME = os.getenv("DB_NAME")
 
 
 def get_execution_plan(sql):
-    """指定したSQLの実行計画をAuroraから取得し、Markdown表形式の文字列で返す"""
-    conn = pymysql.connect(
-        host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
-        database=DB_NAME, connect_timeout=30
-    )
+    """指定したSQLの実行計画をAuroraから取得し、Markdown表形式の文字列で返す。
+    失敗時はNoneを返す（呼び出し側でNoneチェックが必要）"""
+    try:
+        conn = pymysql.connect(
+            host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
+            database=DB_NAME, connect_timeout=30
+        )
+    except pymysql.MySQLError as e:
+        # ホスト名・パスワード誤り、ネットワーク不通など接続自体の失敗
+        print(f"Auroraへの接続に失敗しました: {e}")
+        return None
+
     try:
         with conn.cursor() as cursor:
-            # EXPLAIN文を実行し、実行計画（type, key, rowsなど）を取得
-            cursor.execute(f"EXPLAIN {sql}")
+            try:
+                # EXPLAIN文を実行し、実行計画（type, key, rowsなど）を取得
+                cursor.execute(f"EXPLAIN {sql}")
+            except pymysql.MySQLError as e:
+                # SQL文が不正な場合など（構文エラー、存在しないテーブル名など）
+                print(f"EXPLAINの実行に失敗しました。SQL文を確認してください: {e}")
+                return None
+
             columns = [desc[0] for desc in cursor.description]
             rows = cursor.fetchall()
 
@@ -51,12 +64,19 @@ WHERE o.order_date > '2025-01-01'"""
 
     print("Auroraから実行計画を取得中...")
     plan_text = get_execution_plan(sql)
-    print(plan_text)
 
-    # 取得した実行計画をBedrockに渡し、ボトルネックと改善案を分析させる
-    print("\nBedrockで分析中...")
-    result = analyze_sql_performance(sql, plan_text)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    if plan_text is None:
+        print("実行計画の取得に失敗したため、処理を中断しました")
+    else:
+        print(plan_text)
 
-    # 分析結果をS3に保存（ファイル名にパターン名を付与し、後で見返せるように）
-    save_result_to_s3(result, "real_aurora_pattern1")
+        # 取得した実行計画をBedrockに渡し、ボトルネックと改善案を分析させる
+        print("\nBedrockで分析中...")
+        result = analyze_sql_performance(sql, plan_text)
+
+        if result is None:
+            print("Bedrockでの分析に失敗したため、S3保存をスキップしました")
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            # 分析結果をS3に保存（ファイル名にパターン名を付与し、後で見返せるように）
+            save_result_to_s3(result, "real_aurora_pattern1")

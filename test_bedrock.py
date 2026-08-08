@@ -1,29 +1,40 @@
 import boto3
 import json
 from datetime import datetime
+from botocore.exceptions import ClientError, BotoCoreError
 
 s3_client = boto3.client("s3", region_name="ap-northeast-1")
 BUCKET_NAME = "sql-performance-portfolio-2026"
+
 
 def save_result_to_s3(result, label):
     """分析結果をS3にJSONファイルとして保存する"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     key = f"results/{label}_{timestamp}.json"
 
-    s3_client.put_object(
-        Bucket=BUCKET_NAME,
-        Key=key,
-        Body=json.dumps(result, ensure_ascii=False, indent=2),
-        ContentType="application/json"
-    )
-    print(f"S3に保存しました: s3://{BUCKET_NAME}/{key}")
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=key,
+            Body=json.dumps(result, ensure_ascii=False, indent=2),
+            ContentType="application/json"
+        )
+        print(f"S3に保存しました: s3://{BUCKET_NAME}/{key}")
+    except ClientError as e:
+        # 権限不足・バケット不存在など、AWS側からの明確なエラー
+        print(f"S3への保存に失敗しました(AWSエラー): {e}")
+    except BotoCoreError as e:
+        # ネットワーク不通など、boto3内部のエラー
+        print(f"S3への保存に失敗しました(接続エラー): {e}")
+
 
 client = boto3.client("bedrock-runtime", region_name="ap-northeast-1")
 model_id = "global.anthropic.claude-sonnet-5"
 
 
 def analyze_sql_performance(sql, execution_plan_table):
-    """SQLと実行計画を渡すと、Bedrockで分析してJSON(dict)を返す"""
+    """SQLと実行計画を渡すと、Bedrockで分析してJSON(dict)を返す。
+    失敗時はNoneを返す(呼び出し側でNoneチェックが必要)"""
 
     prompt = f"""あなたはSQLパフォーマンスチューニングの専門家です。
 以下のSQL実行計画を分析し、必ず以下のJSON形式のみで出力してください。前置きや説明文は不要です。JSON以外の文字は一切出力しないでください。
@@ -47,54 +58,41 @@ def analyze_sql_performance(sql, execution_plan_table):
 """
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
-    response = client.converse(modelId=model_id, messages=messages)
 
+    # 1. Bedrock呼び出し自体の失敗に備える
+    try:
+        response = client.converse(modelId=model_id, messages=messages)
+    except ClientError as e:
+        print(f"Bedrock呼び出しに失敗しました(AWSエラー): {e}")
+        return None
+    except BotoCoreError as e:
+        print(f"Bedrock呼び出しに失敗しました(接続エラー): {e}")
+        return None
+
+    # 2. レスポンスの中にtextブロックが見つからない場合に備える
     output_text = None
-    for block in response["output"]["message"]["content"]:
-        if "text" in block:
-            output_text = block["text"]
-            break
+    try:
+        for block in response["output"]["message"]["content"]:
+            if "text" in block:
+                output_text = block["text"]
+                break
+    except (KeyError, IndexError) as e:
+        print(f"レスポンス形式が想定と異なります: {e}")
+        return None
+
+    if output_text is None:
+        print("Bedrockのレスポンスにテキストが含まれていません")
+        return None
 
     cleaned_text = output_text.strip()
     if cleaned_text.startswith("```"):
         cleaned_text = cleaned_text.split("\n", 1)[1]
         cleaned_text = cleaned_text.rsplit("```", 1)[0]
 
-    return json.loads(cleaned_text)
-
-
-if __name__ == "__main__":
-    # パターン1：JOIN + フルスキャン
-    sql1 = """SELECT * FROM orders o
-JOIN customers c ON o.customer_id = c.id
-WHERE o.order_date > '2025-01-01';"""
-
-    plan1 = """| Operation | Cost | Rows |
-|---|---|---|
-| TABLE ACCESS FULL orders | 8500 | 1200000 |
-| TABLE ACCESS FULL customers | 3200 | 500000 |
-| HASH JOIN | 12000 | 45000 |"""
-
-    # パターン2：サブクエリ + ソート処理が重いケース
-    sql2 = """SELECT product_id, SUM(amount) as total
-FROM sales
-WHERE sale_date BETWEEN '2025-01-01' AND '2025-12-31'
-GROUP BY product_id
-ORDER BY total DESC;"""
-
-    plan2 = """| Operation | Cost | Rows |
-|---|---|---|
-| TABLE ACCESS FULL sales | 15000 | 3000000 |
-| SORT GROUP BY | 22000 | 8000 |
-| SORT ORDER BY | 23500 | 8000 |"""
-
-    print("=== パターン1 ===")
-    result1 = analyze_sql_performance(sql1, plan1)
-    print(json.dumps(result1, indent=2, ensure_ascii=False))
-    save_result_to_s3(result1, "pattern1")
-
-
-    print("\n=== パターン2 ===")
-    result2 = analyze_sql_performance(sql2, plan2)
-    print(json.dumps(result2, indent=2, ensure_ascii=False))
-    save_result_to_s3(result2, "pattern2")
+    # 3. JSONパース失敗に備える(モデルが指示通りJSONを返さない場合)
+    try:
+        return json.loads(cleaned_text)
+    except json.JSONDecodeError as e:
+        print(f"分析結果のJSON解析に失敗しました: {e}")
+        print(f"受け取った内容: {cleaned_text[:200]}...")  # デバッグ用に先頭だけ表示
+        return None

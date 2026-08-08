@@ -19,8 +19,18 @@ sql = st.text_area("SQL文を入力してください", value=default_sql, heigh
 analyze_button = st.button("実行計画を取得してAI分析する", type="primary")
 
 if analyze_button:
+    # 入力が空の場合は、そもそも処理を始めない
+    if not sql.strip():
+        st.warning("SQL文を入力してください")
+        st.stop()
+
     with st.spinner("Auroraから実行計画を取得中..."):
         plan_text = get_execution_plan(sql)
+
+    # DB接続失敗・EXPLAIN失敗の場合、get_execution_planはNoneを返す
+    if plan_text is None:
+        st.error("実行計画の取得に失敗しました。SQL文の内容やAuroraへの接続状況を確認してください。")
+        st.stop()
 
     st.subheader("実行計画（Aurora実データ）")
     st.code(plan_text, language="text")
@@ -28,27 +38,36 @@ if analyze_button:
     with st.spinner("Bedrockで分析中..."):
         result = analyze_sql_performance(sql, plan_text)
 
+    # Bedrock呼び出し失敗・JSON解析失敗の場合、analyze_sql_performanceはNoneを返す
+    if result is None:
+        st.error("Bedrockでの分析に失敗しました。しばらく待ってから再度お試しください。")
+        st.stop()
+
     # --- サマリー ---
     st.subheader("分析結果")
-    st.info(result["summary"])
+    st.info(result.get("summary", "サマリー情報がありません"))
 
     # --- ボトルネック ---
     st.markdown("### ボトルネック")
     severity_color = {"high": "🔴", "medium": "🟡", "low": "🟢"}
-    for b in result["bottlenecks"]:
-        icon = severity_color.get(b["severity"], "⚪")
-        st.markdown(f"{icon} **{b['operation']}**（{b['severity']}）")
-        st.write(b["issue"])
+    for b in result.get("bottlenecks", []):
+        icon = severity_color.get(b.get("severity"), "⚪")
+        st.markdown(f"{icon} **{b.get('operation', '不明')}**（{b.get('severity', '不明')}）")
+        st.write(b.get("issue", ""))
 
     # --- 改善提案 ---
     st.markdown("### 改善提案")
-    for r in result["recommendations"]:
-        with st.expander(r["title"]):
-            st.write(r["description"])
+    for r in result.get("recommendations", []):
+        with st.expander(r.get("title", "改善提案")):
+            st.write(r.get("description", ""))
             if r.get("sql_example"):
                 st.code(r["sql_example"], language="sql")
-            st.caption(f"期待効果：{r['expected_impact']}")
+            st.caption(f"期待効果：{r.get('expected_impact', '不明')}")
 
     # --- S3保存 ---
-    save_result_to_s3(result, "dashboard_analysis")
-    st.success("分析結果をS3に保存しました")
+    try:
+        save_result_to_s3(result, "dashboard_analysis")
+        st.success("分析結果をS3に保存しました")
+    except Exception as e:
+        # save_result_to_s3内部でもエラーはキャッチしているが、念のため画面表示用に捕捉
+        st.warning(f"S3への保存中に問題が発生しましたが、分析結果の表示は完了しています: {e}")
