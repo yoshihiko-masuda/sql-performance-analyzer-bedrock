@@ -32,13 +32,16 @@ SQL文と実行計画を入力すると、Claude（AWS Bedrock）がボトルネ
 
 ## テスト
 
-DB接続を必要としないロジック部分（実行計画のMarkdown変換処理）について、単体テストを用意しています。
+DB接続やBedrock API呼び出しを必要としないロジック部分について、単体テストを用意しています。
 
 ​```bash
-pytest test_format_markdown.py -v
+pytest -v
 ​```
 
-空データやNone値混入など、エッジケースも含めてテストしています。
+- `test_format_markdown.py`：実行計画のMarkdown変換ロジック（空データ、None値混入などのエッジケースを含む）
+- `test_bedrock_logic.py`：Bedrockレスポンスの解析ロジック（テキスト抽出、コードブロック除去、JSON解析）
+
+実際にテスト駆動で末尾の改行が残るバグを発見・修正した実績もあります。
 
 
 ## 実行方法
