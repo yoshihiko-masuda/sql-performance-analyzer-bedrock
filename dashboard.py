@@ -1,12 +1,20 @@
 import streamlit as st
 import json
+import os
 from analyze_real_sql import get_execution_plan
+from mock_data import get_mock_execution_plan
 from test_bedrock import analyze_sql_performance, save_result_to_s3
+
+# デプロイ環境でAurora接続ができない場合に、モックデータで動かすためのフラグ
+USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
 st.set_page_config(page_title="SQL性能分析ダッシュボード", layout="wide")
 
 st.title("SQL性能分析ダッシュボード")
 st.caption("AWS Bedrock（Claude）を使って、Auroraの実行計画を自動分析します")
+
+if USE_MOCK_DATA:
+    st.warning("デモ環境のため、実行計画はサンプルデータを使用しています（Bedrockによる分析は実際のAPIを使用）")
 
 # --- SQL入力エリア ---
 st.subheader("分析するSQL")
@@ -24,15 +32,18 @@ if analyze_button:
         st.warning("SQL文を入力してください")
         st.stop()
 
-    with st.spinner("Auroraから実行計画を取得中..."):
-        plan_text = get_execution_plan(sql)
+    with st.spinner("実行計画を取得中..."):
+        if USE_MOCK_DATA:
+            plan_text = get_mock_execution_plan(sql)
+        else:
+            plan_text = get_execution_plan(sql)
 
     # DB接続失敗・EXPLAIN失敗の場合、get_execution_planはNoneを返す
     if plan_text is None:
         st.error("実行計画の取得に失敗しました。SQL文の内容やAuroraへの接続状況を確認してください。")
         st.stop()
 
-    st.subheader("実行計画（Aurora実データ）")
+    st.subheader("実行計画（Aurora実データ）" if not USE_MOCK_DATA else "実行計画（サンプルデータ）")
     st.code(plan_text, language="text")
 
     with st.spinner("Bedrockで分析中..."):
@@ -69,5 +80,4 @@ if analyze_button:
         save_result_to_s3(result, "dashboard_analysis")
         st.success("分析結果をS3に保存しました")
     except Exception as e:
-        # save_result_to_s3内部でもエラーはキャッチしているが、念のため画面表示用に捕捉
         st.warning(f"S3への保存中に問題が発生しましたが、分析結果の表示は完了しています: {e}")

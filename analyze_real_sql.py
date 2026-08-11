@@ -1,3 +1,22 @@
+"""
+Aurora MySQLに接続してSQL実行計画（EXPLAIN）を取得し、
+Bedrock(Claude)による性能分析を実行、結果をS3に保存するスクリプト
+"""
+import pymysql
+import json
+import os
+from dotenv import load_dotenv
+from test_bedrock import analyze_sql_performance, save_result_to_s3
+
+# .envファイルからDB接続情報などの環境変数を読み込む（機密情報はGit管理しない）
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+
+
 def format_as_markdown_table(columns, rows):
     """カラム名とレコードのリストを受け取り、Markdown表形式の文字列に変換する。
     DB接続を必要としない純粋な変換ロジックのため、単体テストが可能。"""
@@ -35,3 +54,27 @@ def get_execution_plan(sql):
             return format_as_markdown_table(columns, rows)
     finally:
         conn.close()
+
+
+if __name__ == "__main__":
+    # 動作確認用のサンプルSQL（order_dateに未インデックスの想定パターン）
+    sql = """SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE o.order_date > '2025-01-01'"""
+
+    print("Auroraから実行計画を取得中...")
+    plan_text = get_execution_plan(sql)
+
+    if plan_text is None:
+        print("実行計画の取得に失敗したため、処理を中断しました")
+    else:
+        print(plan_text)
+
+        print("\nBedrockで分析中...")
+        result = analyze_sql_performance(sql, plan_text)
+
+        if result is None:
+            print("Bedrockでの分析に失敗したため、S3保存をスキップしました")
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            save_result_to_s3(result, "real_aurora_pattern1")
